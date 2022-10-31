@@ -25,6 +25,7 @@ class UART:
   def write(self, data):
     ret =  self.ser.write(data)
     self.ser.flush()
+    print(data)
     return ret
   
   def close(self):
