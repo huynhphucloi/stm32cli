@@ -1,4 +1,4 @@
-from operator import truediv
+import colorama
 from .uart import UART
 from .bsp import delay, millis
 
@@ -60,17 +60,17 @@ class CMD:
   def cmdReceivePacket(self):
     ret = False
     rx_data = 0
-    
     if(self.uart.available()):
       rx_data = self.uart.read()
     else:
       return False
-    
     if(millis() - self.pre_time >= 100):
       self.state = self.CMD_STATE_WAIT_STX
+      return False
     
     self.pre_time = millis()
     
+    rx_data = int.from_bytes(rx_data, "little")
     match self.state:
       case  self.CMD_STATE_WAIT_STX:
         if(rx_data == self.CMD_STX):
@@ -90,6 +90,9 @@ class CMD:
       case self.CMD_STATE_WAIT_ERROR:
         self.rx_packet.error = rx_data
         self.rx_packet.check_sum ^= rx_data
+        self.rx_packet.length = 0
+        self.rx_packet.buffer = []
+        self.index = 0
         self.state = self.CMD_STATE_WAIT_LENGTH_L
         
       case self.CMD_STATE_WAIT_LENGTH_L:
@@ -100,9 +103,8 @@ class CMD:
       case self.CMD_STATE_WAIT_LENGTH_H:
         self.rx_packet.length |= rx_data << 8
         self.rx_packet.check_sum ^= rx_data
-        
         if(self.rx_packet.length > 0):
-          self.index = 0
+          self.rx_packet.buffer = []
           self.state = self.CMD_STATE_WAIT_DATA
         else:
           self.state = self.CMD_STATE_WAIT_CHECKSUM
@@ -111,11 +113,10 @@ class CMD:
         self.rx_packet.buffer.append(rx_data)
         self.rx_packet.check_sum ^= rx_data
         self.index += 1
-        
         if(self.index == self.rx_packet.length):
           self.state = self.CMD_STATE_WAIT_CHECKSUM
         else:
-          self.state = self.CMD_STATE_WAIT_CHECKSUM
+          self.state = self.CMD_STATE_WAIT_DATA
           
       case self.CMD_STATE_WAIT_CHECKSUM:
         self.rx_packet.check_sum_recv = rx_data
@@ -125,12 +126,12 @@ class CMD:
         if(rx_data == self.CMD_EXT):
           if(self.rx_packet.check_sum == self.rx_packet.check_sum_recv):
             ret = True
-        self.state = self.CMD_STATE_WAIT_STX
-         
+        self.state = self.CMD_STATE_WAIT_STX  
     return ret
         
         
   def cmdSendCmd(self, cmd, data, length):
+    self.tx_packet.buffer = []
     self.tx_packet.buffer.append(self.CMD_STX)
     self.tx_packet.buffer.append(cmd)
     self.tx_packet.buffer.append(self.CMD_DIR_M_TO_S)
@@ -143,13 +144,11 @@ class CMD:
     
     checksum = 0
     
-    for i in range(length + 5):
-      i+=1
+    for i in range(1, length + 6, 1):
       checksum ^= self.tx_packet.buffer[i]
       
     self.tx_packet.buffer.append(checksum)
     self.tx_packet.buffer.append(self.CMD_EXT)
-    
     self.uart.write(self.tx_packet.buffer)
     
   
@@ -175,14 +174,14 @@ class CMD:
     
     self.uart.write(self.tx_packet.buffer)
   
-  def cmfSendCmdRxResp(self, cmd, data, length, timout):
+  def cmdSendCmdRxResp(self, cmd, data, length, timout):
     ret = False
     pretime = 0
     
     self.cmdSendCmd(cmd, data, length)
     
     pretime = millis()
-    
+
     while True:
       if(self.cmdReceivePacket() == True):
         ret = True
