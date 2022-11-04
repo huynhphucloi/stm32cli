@@ -1,2 +1,0 @@
-[console_scripts]
-stm32cli = stm32cli:main
